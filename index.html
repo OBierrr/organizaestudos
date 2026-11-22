@@ -61,6 +61,7 @@
 <div class="overlay" id="delete-overlay" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-subtitle"><div class="dialog-top"><div class="delete-icon"><svg aria-hidden="true"><use href="#i-trash"/></svg></div><button class="close" aria-label="Fechar confirmação" data-close="delete"><svg aria-hidden="true"><use href="#i-x"/></svg></button></div><h2 id="delete-title">Excluir esta tarefa?</h2><p class="dialog-subtitle" id="delete-subtitle">Ela será removida da sua lista. Você poderá desfazer logo após a exclusão.</p><p class="delete-title" id="delete-task-name"></p><div class="form-footer"><button class="secondary" data-close="delete">Manter tarefa</button><button class="primary destructive" id="confirm-delete"><svg aria-hidden="true"><use href="#i-trash"/></svg>Excluir tarefa</button></div></section></div>
 <div class="overlay" id="help-overlay" hidden><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><div class="dialog-top"><h2 id="help-title">Seu próximo passo</h2><button class="close" aria-label="Fechar ajuda" data-close="help"><svg aria-hidden="true"><use href="#i-x"/></svg></button></div><p class="dialog-subtitle">Organizar pode ser simples.</p><ol class="help-list"><li>Use <strong>Nova tarefa</strong> para cadastrar o que precisa fazer.</li><li>Escreva um título de 1 a 100 caracteres. A descrição é opcional e aceita até 500.</li><li>Marque o quadrado ao lado da tarefa para concluir. Clique novamente para voltar a pendente.</li><li>Use os filtros para ver pendências ou atividades concluídas.</li><li>Use os ícones de lápis e lixeira para editar ou excluir.</li></ol><p class="dialog-subtitle">As tarefas são salvas apenas neste navegador. Este protótipo começa com atividades de exemplo.</p><button class="restore" id="restore-demo">Restaurar atividades de exemplo</button><div class="form-footer"><button class="primary" data-close="help">Vamos começar</button></div></section></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden><svg aria-hidden="true"><use href="#i-done"/></svg><span class="toast-text" id="toast-text"></span><button id="undo-delete" hidden>Desfazer</button></div>
+<script src="tarefas.js"></script>
 <script>
 (() => {
 'use strict';
@@ -74,7 +75,7 @@ const initialTasks=[
 ];
 const $=id=>document.getElementById(id);
 const cloneDemo=()=>initialTasks.map(t=>({...t}));
-const size=s=>Array.from(s).length;
+const { tamanho: size, validarTitulo, validarDescricao, filtrarTarefas } = RegrasDeTarefas;
 let tasks=cloneDemo(),filter='all',editingId=null,deletingId=null,lastDeleted=null,lastDeletedIndex=0,toastTimer,returnFocus,activeOverlay=null;
 try{const raw=localStorage.getItem(storageKey);if(raw!==null){const saved=JSON.parse(raw);if(Array.isArray(saved)&&saved.every(t=>t&&typeof t.id==='string'&&typeof t.title==='string'&&size(t.title.trim())>=1&&size(t.title.trim())<=100&&typeof t.description==='string'&&size(t.description)<=500&&typeof t.done==='boolean')&&new Set(saved.map(t=>t.id)).size===saved.length)tasks=saved;}}catch(e){$('save-warning').classList.add('visible');}
 const icon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('aria-hidden','true');const u=document.createElementNS('http://www.w3.org/2000/svg','use');u.setAttribute('href','#i-'+name);s.append(u);return s;};
@@ -87,7 +88,7 @@ function render(){
  const done=tasks.filter(t=>t.done).length,pending=tasks.length-done;
  for(const [key,value] of Object.entries({all:tasks.length,pending,done})){$('stat-'+key).textContent=value;document.querySelectorAll('[data-count="'+key+'"]').forEach(n=>n.textContent=value);}
  document.querySelectorAll('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.filter===filter)));
- const visible=tasks.filter(t=>filter==='all'||(filter==='done'?t.done:!t.done));
+ const visible=filtrarTarefas(tasks,filter);
  $('tasks-heading').textContent=filter==='pending'?'Tarefas pendentes':filter==='done'?'Tarefas concluídas':'Suas tarefas';
  $('list-count').textContent=visible.length+' '+(visible.length===1?'tarefa':'tarefas');
  const pct=tasks.length?Math.round(done/tasks.length*100):0;
@@ -106,7 +107,18 @@ function render(){
 }
 function updateCounters(){$('title-counter').textContent=size($('task-title').value.trim())+'/100';$('description-counter').textContent=size($('task-description').value)+'/500';}
 function clearErrors(){for(const field of ['title','description']){$(field+'-error').textContent='';$('task-'+field).setAttribute('aria-invalid','false');}}
-function validate(){clearErrors();const title=$('task-title').value.trim(),description=$('task-description').value;let valid=true;if(!size(title)||size(title)>100){$('title-error').textContent=!size(title)?'Informe um título para a tarefa.':'Use até 100 caracteres no título.';$('task-title').setAttribute('aria-invalid','true');valid=false;}if(size(description)>500){$('description-error').textContent='Use até 500 caracteres na descrição.';$('task-description').setAttribute('aria-invalid','true');valid=false;}return valid;}
+function validate() {
+ clearErrors();
+ const titulo = validarTitulo($('task-title').value);
+ const descricao = validarDescricao($('task-description').value);
+ for (const [campo, resultado] of [['title', titulo], ['description', descricao]]) {
+  if (resultado.erro) {
+   $(campo+'-error').textContent = resultado.erro;
+   $('task-'+campo).setAttribute('aria-invalid','true');
+  }
+ }
+ return titulo.erro || descricao.erro ? null : { title: titulo.titulo, description: descricao.descricao };
+}
 function openForm(id=null){editingId=id;const t=tasks.find(t=>t.id===id);$('form-title').textContent=t?'Editar tarefa':'Nova tarefa';$('form-subtitle').textContent=t?'Ajuste o plano. Cada detalhe ajuda no próximo passo.':'Tire a ideia da cabeça e coloque no seu plano.';$('task-title').value=t?t.title:'';$('task-description').value=t?t.description:'';$('submit-task').querySelector('span').textContent=t?'Salvar alterações':'Criar tarefa';$('submit-task').querySelector('use').setAttribute('href',t?'#i-check':'#i-plus');clearErrors();updateCounters();showOverlay('form');}
 function openDelete(id){deletingId=id;const t=tasks.find(t=>t.id===id);if(!t)return;$('delete-task-name').textContent=t.title;showOverlay('delete');}
 document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>setFilter(b.dataset.filter));
@@ -115,7 +127,7 @@ document.querySelectorAll('[data-action="help"]').forEach(b=>b.onclick=()=>showO
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeOverlay(b.dataset.close));
 document.querySelectorAll('.overlay').forEach(overlay=>overlay.addEventListener('click',e=>{if(e.target===overlay)closeOverlay(overlay.id.replace('-overlay',''));}));
 for(const field of ['title','description'])$('task-'+field).addEventListener('input',()=>{updateCounters();if($('task-'+field).getAttribute('aria-invalid')==='true'){$(field+'-error').textContent='';$('task-'+field).setAttribute('aria-invalid','false');}});
-$('task-form').addEventListener('submit',e=>{e.preventDefault();if(!validate()){document.querySelector('[aria-invalid="true"]').focus();return;}const title=$('task-title').value.trim(),description=$('task-description').value;const editing=editingId!==null;if(editing){const t=tasks.find(t=>t.id===editingId);if(t){t.title=title;t.description=description;}}else{const id=typeof crypto.randomUUID==='function'?crypto.randomUUID():'task-'+Date.now()+'-'+Math.random().toString(36).slice(2);tasks.unshift({id,title,description,done:false});filter='all';}save();render();closeOverlay('form');toast(editing?'Alterações salvas. Seu plano está atualizado.':'Tarefa criada. Um novo passo no seu plano!');});
+$('task-form').addEventListener('submit',e=>{e.preventDefault();const dados=validate();if(!dados){document.querySelector('[aria-invalid="true"]').focus();return;}const {title,description}=dados;const editing=editingId!==null;if(editing){const t=tasks.find(t=>t.id===editingId);if(t){t.title=title;t.description=description;}}else{const id=typeof crypto.randomUUID==='function'?crypto.randomUUID():'task-'+Date.now()+'-'+Math.random().toString(36).slice(2);tasks.unshift({id,title,description,done:false});filter='all';}save();render();closeOverlay('form');toast(editing?'Alterações salvas. Seu plano está atualizado.':'Tarefa criada. Um novo passo no seu plano!');});
 $('confirm-delete').onclick=()=>{const index=tasks.findIndex(t=>t.id===deletingId);if(index<0)return;lastDeleted={...tasks[index]};lastDeletedIndex=index;tasks.splice(index,1);save();render();closeOverlay('delete');toast('Tarefa excluída.',true);};
 $('undo-delete').onclick=()=>{if(!lastDeleted)return;tasks.splice(Math.min(lastDeletedIndex,tasks.length),0,lastDeleted);lastDeleted=null;save();render();toast('Tarefa restaurada.');};
 $('restore-demo').onclick=()=>{tasks=cloneDemo();filter='all';save();render();closeOverlay('help');toast('Atividades de exemplo restauradas.');};
